@@ -5,11 +5,13 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "tsc && node ./build/app.js"
+    "build": "tsc",
+    "start": "tsc && node ./build/keyboardListener.js"
   },
   "author": "rseusebio",
   "license": "ISC",
   "devDependencies": {
+    "@types/file-type": "^10.9.1",
     "@types/keypress": "^2.0.30",
     "@types/node": "^14.14.31",
     "@types/readline-sync": "^1.4.3",
@@ -17,7 +19,9 @@
     "typescript": "^4.2.2"
   },
   "dependencies": {
+    "file-type": "^16.3.0",
     "keypress": "^0.2.1",
+    "pdf-lib": "^1.16.0",
     "readline-sync": "^1.4.10",
     "uuid": "^8.3.2"
   }

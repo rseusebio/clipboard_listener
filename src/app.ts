@@ -12,6 +12,8 @@ const asyncExec = util.promisify(child_process.exec);
 
 class ClipboardListener extends EventEmitter { };
 
+const date = new Date().getSeconds();
+
 
 if( cluster.isMaster )
 {

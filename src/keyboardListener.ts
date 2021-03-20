@@ -1,20 +1,128 @@
 import { exec, spawn } from "child_process";
-import { stderr } from "process";
 import { questionInt } from "readline-sync";
 import util from "util";
+import KeyStateManager from "./KeyStateManager";
 
 const execAsync = util.promisify(exec);
 
-const keyboardListener = (id: string) =>
+const listOpenedWindows = async (): Promise<Array<string[]>> => 
 {
-    const xev = spawn("/usr/bin/xev", ["-id", id, "-event", "keyboard"]);
+    const { stdout, stderr } = await execAsync("/usr/bin/wmctrl -l");
 
-    const obj = {
-        ALT: 0, 
-        C: 0
+    if(stderr)
+    {
+        console.info("Failed to list opened windows");
+
+        console.info(stderr);
+
+        return process.exit(-1);
     }
 
-    const stdoutFunc = (data: Buffer) =>
+    if(!stdout)
+    {
+        console.info("No output. Probably no window is opened.");
+
+        return process.exit(-1);
+    }
+
+    let windows: Array<string[]> =
+        stdout.split("\n")
+            .filter(s => !!s)
+            .map(s => {
+                let arr = s.split(" ");
+                //#region leave only name and id
+                arr.reverse();
+
+                let id = arr.pop();
+
+                for (let i = 0; i < 3; i++)
+                    arr.pop();
+
+                arr.reverse();
+                //#endregion      
+                return [id, arr.join(" ")];
+            })
+            .filter(v => !!v[1]);
+
+    return windows;
+}
+
+const windowsSelection = async (): Promise<string> => 
+{
+    console.info("Retreiving opened windows...");
+
+    let windows: Array<string[]> = await listOpenedWindows();
+
+    if(!windows || windows.length <= 0)
+    {
+        console.info("No opened windows. Exiting...");
+
+        return process.exit(-1);
+    }
+
+    console.info("Select a window (enter the number):\n");
+
+    let index = 1;
+    for(const window of windows)
+    {
+        const [id, name] = window;
+
+        console.info(`${index++} - ${name}`);
+    }
+
+    let windowIndex = -1;
+    do
+    {
+        windowIndex = questionInt("> ");
+
+        if(windowIndex >= 1 && windowIndex <= windows.length)
+        {
+            break;
+        }
+        else
+        {
+            console.info("Out of range");
+        }
+    }
+    while(true);
+
+    const [id] = windows[windowIndex - 1];
+
+    return id;
+}
+
+const keyboardListener = (id: string): void =>
+{
+    const keyStates =
+    {
+        ALT: false,
+        c: false,
+        s: false,
+        esc: false
+    }
+
+    const commandStates = 
+    {
+        ALT_S: false,
+    }
+
+    const turnOffCommand = (command: string) => 
+    {
+        switch(command)
+        {
+            case "ALT_S":
+            {
+                if(!keyStates.ALT && !keyStates.s)
+                {
+                    commandStates[command] = false;
+                }
+                
+                break;
+            }
+        }
+    }
+
+    const dataHadler = async (data: Buffer) =>
     {
         const str = data.toString("utf-8");
 
@@ -25,6 +133,8 @@ const keyboardListener = (id: string) =>
         let res = str.split('\n')
                      .filter(v => keyPress.test(v) || keyRelease.test(v) || keySym.test(v))
                      .map(v => v.trim());
+
+        console.info(res);
 
         if(!res || res.length <= 0)
         {
@@ -38,23 +148,30 @@ const keyboardListener = (id: string) =>
             return;
         }
 
-        const key = keyArr[0].split(", ")[1].replace(')', '').trim();
+        const key = keyArr[0].split(", ")[1]
+                             .replace(')', '')
+                             .trim();
 
         if(res.length == 4)
         {
-            // Key was pressed
-            // console.info("Pressed: ", key);
-
-            if(key == "c" && obj.C == 0)
+            if (key == "c" && !keyStates.c)
             {
-                obj.C += 1
+                keyStates.c = true;
             }
-            else if(key == "Alt_L" && obj.ALT == 0)
+            else if (key == "Alt_L" && !keyStates.ALT)
             {
-                obj.ALT += 1
+                keyStates.ALT = true;
+            }
+            else if (key == "s" && !keyStates.s)
+            {
+                keyStates.s = true;
+            }
+            else if (key == "Espace" && !keyStates.esc)
+            {
+                keyStates.esc = true;
             }
 
-            if( obj.ALT == 1 && obj.C == 1)
+            if (keyStates.ALT && keyStates.c)
             {
                 console.info("clipboard");
 
@@ -73,119 +190,96 @@ const keyboardListener = (id: string) =>
 
                      });
             }
+            else if (keyStates.ALT && keyStates.s && !commandStates.ALT_S)
+            {
+                commandStates.ALT_S = true; 
+
+                console.info("select and area");
+
+                exec("gnome-screenshot -a -c", ( err, stdout, stderr)=>{
+                    if(err)
+                    {
+                        console.info(`Error: `, stderr, err);
+                        return;
+                    }
+                    else 
+                    {
+                        console.info("stdout: ", stdout);
+                        const timeStamp = Date.now().valueOf();
+                        exec(`xclip -sel c -t image/png -o > /home/rseusebio/Codes/clipboard_listener/.imgs/${timeStamp}.png`, 
+                        (err, stdout, stderr) => {
+                            if(err)
+                            {
+                                console.info("Erro (png)", stderr, err);
+
+                                return;
+                            }
+                            else
+                            {
+                                console.info("png succeeded: ", stdout);
+                            }
+                        })
+                    }
+                });
+
+                console.info("exited");
+            }
         }
         else if(res.length == 2 )
         {
-            // Key was released
-            // console.info("Released: ", key);
-
             if(key == "c")
             {
-                obj.C -= 1
+                keyStates.c = false;
             }
             else if(key == "Alt_L")
             {
-                obj.ALT -= 1
-            }
+                keyStates.ALT = false;
 
+                turnOffCommand("ALT_S");
+            }
+            else if(key == "s")
+            {
+                keyStates.s = false;
+
+                turnOffCommand("ALT_S");
+            }
+            else if (key == "Espace" && !keyStates.esc)
+            {
+                keyStates.esc = false;
+            }
         }
     }
 
-    xev.stdout.on('data', stdoutFunc);
+    const xev = spawn("/usr/bin/xev", ["-id", id, "-event", "keyboard"]);
+
+    xev.stdout.on('data', dataHadler);
 
     xev.stderr.on('data', (data) => {
-    console.error(`stderr: ${data}`);
+        console.error(`stderr: ${data}`);
+    });
+
+    xev.on("error", (err) => {
+        console.error("An error has occurred: ", err);
     });
 
     xev.on('close', (code) => {
-    console.log(`child process exited with code ${code}`);
+        console.log(`child process exited with code ${code}`);
     });
 
-    xev.on("exit", (code, signal) =>{
-        console.info( "child process has desconnected: ", code, signal);
+    xev.on("exit", (code, signal) => {
+        console.info("child process has desconnected: ", code, signal);
     });
 }
 
-const listOpenedWindows = async () => 
-{
-    const {stdout, stderr } = await execAsync("/usr/bin/wmctrl -l");
-
-    if(stderr)
-    {
-        console.info("Failed to list opened windows");
-        console.info(stderr);
-        return null
-    }
-
-    if(!stdout)
-    {
-        return "";
-    }
-
-    let result: Array<string[]> = stdout.split("\n")
-                                        .filter( s => !!s )
-                                        .map( s => 
-                                              { 
-                                                let arr = s.split(" ");        
-                                                //#region leave only name and id
-                                                    arr.reverse();
-                                                    let id = arr.pop();
-                                                    for(let i = 0; i < 3; i++)
-                                                    {
-                                                        arr.pop();
-                                                    }
-                                                    arr.reverse();
-                                                //#endregion      
-                                                return [ id, arr.join(" ") ];
-                                              }
-                                            )
-                                        .filter( v => !!v[1] );     
-    return result;
-}
 
 const run = async () => 
-{
-    let windows = await listOpenedWindows();
-
-    if( windows == null || !windows )
-    {
-        console.info("Exiting...");
-        return;
-    }
-
-    console.info("Select a window (input the number):\n");
-
-    let count = 1;
-
-    for(let window of (windows as Array<string[]>))
-    {
-        const[ id, name ] = window;
-
-        console.info(`${count++} - ${name}`);
-    }
-
-    let windowIndex = -1;
-
-    do
-    {
-        windowIndex = questionInt("> ");
-        if(windowIndex >= 1 && windowIndex <= windows.length)
-        {
-            break;
-        }
-        else
-        {
-            console.info("Out of range");
-        }
-    }
-    while(true);
-
-    const [ id ] = (windows[windowIndex - 1] as string[]);
+{   
+    const id = await windowsSelection();
 
     keyboardListener(id);
-    
 }
 
-run().then((v)=>{console.info("received: ", v)})
+run()
+.then(v => console.info("received: ", v));
 
 export default keyboardListener;

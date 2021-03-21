@@ -1,5 +1,6 @@
 import { exec } from "child_process";
 import path from "path";
+import fs from "fs";
 
 enum KeyAction
 {
@@ -24,10 +25,15 @@ class KeyStateManager
 
     constructor(imgOutput: string)
     {
+        if (!fs.lstatSync(imgOutput).isDirectory())
+        {
+            fs.mkdirSync(imgOutput);
+        }
+
         this.imgOutput = imgOutput;
     }
 
-    public formatInput(data: Buffer)
+    private formatInput(data: Buffer)
     {
         const str = data.toString("utf-8");
 
@@ -61,7 +67,7 @@ class KeyStateManager
         return { key, keyAction };
     }
 
-    public keyPressed(key: string)
+    private keyPressed(key: string)
     {
         switch (key)
         {
@@ -116,7 +122,7 @@ class KeyStateManager
         }
     }
 
-    public keyReleased(key: string)
+    private keyReleased(key: string)
     {
         switch (key)
         {
@@ -171,10 +177,12 @@ class KeyStateManager
         }
     }
 
-    public processCommands()
+    private processCommands()
     {
         if(this.ALT && this.S && !this.ALT_S)
         {
+            this.ALT_S = true;
+
             const screenshotCmd = "gnome-screenshot -a -c";
 
             exec(screenshotCmd, (err, stdout, stderr) => 
@@ -182,6 +190,8 @@ class KeyStateManager
                 if (err)
                 {
                     console.error(`SCREENSHOT FAILED: ${stderr}`, err);
+
+                    this.ALT_S = false;
 
                     return;
                 }
@@ -196,13 +206,40 @@ class KeyStateManager
                     {
                         console.error(`FAILED TO SAVE IMAGE: ${stderr}`, err);
 
+                        this.ALT_S = false;
+
                         return;
                     }
 
                     console.log(`SAVED FILE: ${fileName}`);
+
+                    this.ALT_S = false;
                 });
             });
         }
+    }
+
+    public receivedData(data: Buffer)
+    {
+        const formatedData = this.formatInput(data);
+
+        if (!formatedData)
+        {
+            return;
+        }
+
+        const { key, keyAction } = formatedData;
+
+        if (keyAction === KeyAction.PRESS)
+        {   
+            this.keyPressed(key);
+        }
+        else if (keyAction === KeyAction.RELEASE)
+        {
+            this.keyReleased(key);
+        }
+
+        this.processCommands();
     }
 }
 
